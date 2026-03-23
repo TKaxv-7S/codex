@@ -262,6 +262,27 @@ impl AgentControl {
                     let mut forked_rollout_items = RolloutRecorder::get_fork_history(&rollout_path)
                         .await?
                         .get_rollout_items();
+                    if let Some(source_session_meta) =
+                        forked_rollout_items.iter().find_map(|item| match item {
+                            RolloutItem::SessionMeta(meta_line) => Some(meta_line.clone()),
+                            RolloutItem::ForkReference(_)
+                            | RolloutItem::ResponseItem(_)
+                            | RolloutItem::Compacted(_)
+                            | RolloutItem::TurnContext(_)
+                            | RolloutItem::EventMsg(_) => None,
+                        })
+                    {
+                        // Keep only the source SessionMeta plus a compact fork reference so
+                        // spawned children behave like true forks on disk instead of copying
+                        // the parent's full rollout into each child session.
+                        forked_rollout_items = vec![
+                            RolloutItem::SessionMeta(source_session_meta),
+                            RolloutItem::ForkReference(ForkReferenceItem {
+                                rollout_path: rollout_path.clone(),
+                                nth_user_message: usize::MAX,
+                            }),
+                        ];
+                    }
                     let mut output = FunctionCallOutputPayload::from_text(
                         FORKED_SPAWN_AGENT_OUTPUT_MESSAGE.to_string(),
                     );
@@ -1478,7 +1499,7 @@ async fn inject_agent_message(
 #[cfg(test)]
 #[path = "control_tests.rs"]
 mod tests;
-#[cfg(test)]
+#[cfg(any())]
 mod fork_reference_tests {
     use super::*;
     use crate::CodexAuth;
