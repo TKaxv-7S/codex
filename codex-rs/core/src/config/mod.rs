@@ -147,7 +147,7 @@ pub(crate) const DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS: Option<u64> = None;
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 const OPENAI_BASE_URL_ENV_VAR: &str = "OPENAI_BASE_URL";
 #[cfg(target_os = "linux")]
-const SYSTEM_BWRAP_PATH: &str = "/usr/bin/bwrap";
+const SYSTEM_BWRAP_PROGRAM: &str = "bwrap";
 const RESERVED_MODEL_PROVIDER_IDS: [&str; 3] = [
     OPENAI_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
@@ -155,12 +155,22 @@ const RESERVED_MODEL_PROVIDER_IDS: [&str; 3] = [
 ];
 
 #[cfg(target_os = "linux")]
-pub fn system_bwrap_warning() -> Option<String> {
-    system_bwrap_warning_for_path(Path::new(SYSTEM_BWRAP_PATH))
+pub fn system_bwrap_warning(sandbox_policy: &SandboxPolicy) -> Option<String> {
+    if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
+        return None;
+    }
+
+    match find_system_bwrap_in_path() {
+        Some(system_bwrap_path) => system_bwrap_warning_for_path(&system_bwrap_path),
+        None => Some(
+            "Codex could not find system bubblewrap on PATH. Please install bubblewrap with your package manager. Codex will use the vendored bubblewrap in the meantime."
+                .to_string(),
+        ),
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn system_bwrap_warning() -> Option<String> {
+pub fn system_bwrap_warning(_sandbox_policy: &SandboxPolicy) -> Option<String> {
     None
 }
 
@@ -183,7 +193,7 @@ fn system_bwrap_warning_for_path(system_bwrap_path: &Path) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn system_bwrap_supports_argv0(system_bwrap_path: &Path) -> bool {
+pub fn system_bwrap_supports_argv0(system_bwrap_path: &Path) -> bool {
     // bubblewrap added `--argv0` in v0.9.0:
     // https://github.com/containers/bubblewrap/releases/tag/v0.9.0
     let output = match Command::new(system_bwrap_path).arg("--help").output() {
@@ -193,6 +203,20 @@ fn system_bwrap_supports_argv0(system_bwrap_path: &Path) -> bool {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     stdout.contains("--argv0") || stderr.contains("--argv0")
+}
+
+#[cfg(target_os = "linux")]
+pub fn find_system_bwrap_in_path() -> Option<PathBuf> {
+    which::which(SYSTEM_BWRAP_PROGRAM).ok()
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(test)]
+fn find_system_bwrap_in_search_paths(
+    search_paths: impl IntoIterator<Item = PathBuf>,
+) -> Option<PathBuf> {
+    let search_path = std::env::join_paths(search_paths).ok()?;
+    which::which_in(SYSTEM_BWRAP_PROGRAM, Some(search_path), Path::new(".")).ok()
 }
 
 fn resolve_sqlite_home_env(resolved_cwd: &Path) -> Option<PathBuf> {

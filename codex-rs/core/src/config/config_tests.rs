@@ -5593,6 +5593,15 @@ fn system_bwrap_warning_reports_missing_system_bwrap() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn system_bwrap_warning_skips_danger_full_access() {
+    assert_eq!(
+        system_bwrap_warning(&SandboxPolicy::DangerFullAccess),
+        None
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn system_bwrap_warning_reports_too_old_system_bwrap() {
     let fake_bwrap = write_fake_bwrap(
         r#"#!/bin/sh
@@ -5627,14 +5636,36 @@ exit 1
     assert_eq!(system_bwrap_warning_for_path(fake_bwrap_path), None);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn finds_first_executable_bwrap_in_search_paths() {
+    let temp_dir = tempdir().expect("temp dir");
+    let first_dir = temp_dir.path().join("first");
+    let second_dir = temp_dir.path().join("second");
+    std::fs::create_dir_all(&first_dir).expect("create first dir");
+    std::fs::create_dir_all(&second_dir).expect("create second dir");
+    std::fs::write(first_dir.join("bwrap"), "not executable").expect("write non-executable bwrap");
+    let expected_bwrap = write_fake_bwrap_in(&second_dir, "#!/bin/sh\n");
+
+    assert_eq!(
+        find_system_bwrap_in_search_paths(vec![first_dir, second_dir]),
+        Some(expected_bwrap.to_path_buf())
+    );
+}
+
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn system_bwrap_warning_is_disabled_off_linux() {
-    assert!(system_bwrap_warning().is_none());
+    assert!(system_bwrap_warning(&SandboxPolicy::DangerFullAccess).is_none());
 }
 
 #[cfg(target_os = "linux")]
 fn write_fake_bwrap(contents: &str) -> tempfile::TempPath {
+    write_fake_bwrap_in(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), contents)
+}
+
+#[cfg(target_os = "linux")]
+fn write_fake_bwrap_in(dir: &Path, contents: &str) -> tempfile::TempPath {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::NamedTempFile;
@@ -5642,9 +5673,8 @@ fn write_fake_bwrap(contents: &str) -> tempfile::TempPath {
     // Bazel can mount the OS temp directory `noexec`, so prefer the current
     // working directory for fake executables and fall back to the default temp
     // dir outside that environment.
-    let temp_file = std::env::current_dir()
+    let temp_file = NamedTempFile::new_in(dir)
         .ok()
-        .and_then(|dir| NamedTempFile::new_in(dir).ok())
         .unwrap_or_else(|| NamedTempFile::new().expect("temp file"));
     // Linux rejects exec-ing a file that is still open for writing.
     let path = temp_file.into_temp_path();

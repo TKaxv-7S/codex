@@ -4,13 +4,10 @@ use std::os::fd::AsRawFd;
 use std::os::raw::c_char;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
-use std::process::Command;
 use std::sync::OnceLock;
 
 use crate::vendored_bwrap::exec_vendored_bwrap;
 use codex_utils_absolute_path::AbsolutePathBuf;
-
-const SYSTEM_BWRAP_PATH: &str = "/usr/bin/bwrap";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BubblewrapLauncher {
@@ -28,12 +25,15 @@ pub(crate) fn exec_bwrap(argv: Vec<String>, preserved_files: Vec<File>) -> ! {
 fn preferred_bwrap_launcher() -> BubblewrapLauncher {
     static LAUNCHER: OnceLock<BubblewrapLauncher> = OnceLock::new();
     LAUNCHER
-        .get_or_init(|| preferred_bwrap_launcher_for_path(Path::new(SYSTEM_BWRAP_PATH)))
+        .get_or_init(|| match codex_core::config::find_system_bwrap_in_path() {
+            Some(path) => preferred_bwrap_launcher_for_path(&path),
+            None => BubblewrapLauncher::Vendored,
+        })
         .clone()
 }
 
 fn preferred_bwrap_launcher_for_path(system_bwrap_path: &Path) -> BubblewrapLauncher {
-    if !system_bwrap_supports_argv0(system_bwrap_path) {
+    if !codex_core::config::system_bwrap_supports_argv0(system_bwrap_path) {
         return BubblewrapLauncher::Vendored;
     }
 
@@ -45,20 +45,6 @@ fn preferred_bwrap_launcher_for_path(system_bwrap_path: &Path) -> BubblewrapLaun
         ),
     };
     BubblewrapLauncher::System(system_bwrap_path)
-}
-
-fn system_bwrap_supports_argv0(system_bwrap_path: &Path) -> bool {
-    // bubblewrap added `--argv0` in v0.9.0:
-    // https://github.com/containers/bubblewrap/releases/tag/v0.9.0
-    // Older distro packages (for example Ubuntu 20.04/22.04) ship builds that
-    // reject `--argv0`, so prefer the vendored build in that case.
-    let output = match Command::new(system_bwrap_path).arg("--help").output() {
-        Ok(output) => output,
-        Err(_) => return false,
-    };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    stdout.contains("--argv0") || stderr.contains("--argv0")
 }
 
 fn exec_system_bwrap(
@@ -126,8 +112,6 @@ fn clear_cloexec(fd: libc::c_int) {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use tempfile::NamedTempFile;
     use tempfile::TempPath;
 
@@ -209,6 +193,9 @@ exit 1
     }
 
     fn write_fake_bwrap(contents: &str) -> TempPath {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
         // Linux rejects exec-ing a file that is still open for writing.
         let path = NamedTempFile::new().expect("temp file").into_temp_path();
         fs::write(&path, contents).expect("write fake bwrap");
