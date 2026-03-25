@@ -156,12 +156,20 @@ const RESERVED_MODEL_PROVIDER_IDS: [&str; 3] = [
 
 #[cfg(target_os = "linux")]
 pub fn system_bwrap_warning(sandbox_policy: &SandboxPolicy) -> Option<String> {
+    system_bwrap_warning_for_lookup(sandbox_policy, find_system_bwrap_in_path())
+}
+
+#[cfg(target_os = "linux")]
+fn system_bwrap_warning_for_lookup(
+    sandbox_policy: &SandboxPolicy,
+    system_bwrap_path: Option<PathBuf>,
+) -> Option<String> {
     if matches!(sandbox_policy, SandboxPolicy::DangerFullAccess) {
         return None;
     }
 
-    match find_system_bwrap_in_path() {
-        Some(system_bwrap_path) => system_bwrap_warning_for_path(&system_bwrap_path),
+    match system_bwrap_path.as_deref() {
+        Some(system_bwrap_path) => system_bwrap_warning_for_path(system_bwrap_path),
         None => Some(
             "Codex could not find system bubblewrap on PATH. Please install bubblewrap with your package manager. Codex will use the vendored bubblewrap in the meantime."
                 .to_string(),
@@ -176,12 +184,6 @@ pub fn system_bwrap_warning(_sandbox_policy: &SandboxPolicy) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn system_bwrap_warning_for_path(system_bwrap_path: &Path) -> Option<String> {
-    if !system_bwrap_path.is_file() {
-        return Some(format!(
-            "Codex could not find system bubblewrap at {}. Please install bubblewrap with your package manager. Codex will use the vendored bubblewrap in the meantime.",
-            system_bwrap_path.display()
-        ));
-    }
     if system_bwrap_supports_argv0(system_bwrap_path) {
         return None;
     }

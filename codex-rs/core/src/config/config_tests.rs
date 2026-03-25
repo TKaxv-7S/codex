@@ -5585,8 +5585,16 @@ shell_tool = true
 #[cfg(target_os = "linux")]
 #[test]
 fn system_bwrap_warning_reports_missing_system_bwrap() {
-    let warning = system_bwrap_warning_for_path(Path::new("/definitely/not/a/bwrap"))
-        .expect("missing system bwrap should emit a warning");
+    let warning = system_bwrap_warning_for_lookup(
+        &SandboxPolicy::WorkspaceWrite {
+            writable_roots: Vec::new(),
+            network_access: false,
+            exclude_tmpdir_env_var: false,
+            exclude_slash_tmp: false,
+        },
+        None,
+    )
+    .expect("missing system bwrap should emit a warning");
 
     assert!(warning.contains("could not find system bubblewrap"));
 }
@@ -5594,10 +5602,7 @@ fn system_bwrap_warning_reports_missing_system_bwrap() {
 #[cfg(target_os = "linux")]
 #[test]
 fn system_bwrap_warning_skips_danger_full_access() {
-    assert_eq!(
-        system_bwrap_warning(&SandboxPolicy::DangerFullAccess),
-        None
-    );
+    assert_eq!(system_bwrap_warning(&SandboxPolicy::DangerFullAccess), None);
 }
 
 #[cfg(target_os = "linux")]
@@ -5661,7 +5666,10 @@ fn system_bwrap_warning_is_disabled_off_linux() {
 
 #[cfg(target_os = "linux")]
 fn write_fake_bwrap(contents: &str) -> tempfile::TempPath {
-    write_fake_bwrap_in(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), contents)
+    write_fake_bwrap_in(
+        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        contents,
+    )
 }
 
 #[cfg(target_os = "linux")]
